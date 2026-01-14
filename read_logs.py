@@ -19,9 +19,9 @@ from typing import Optional
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Default model used when user hits Enter in the model prompt.
-DEFAULT_MODEL_NAME = "codellama:13b-instruct"
-DEFAULT_CHUNK_SIZE = 1250
-DEFAULT_SIMILARITY_TOP_K = 7
+DEFAULT_MODEL_NAME = "gpt-oss:20b"
+DEFAULT_CHUNK_SIZE = 1000
+DEFAULT_SIMILARITY_TOP_K = 20
 logger = logging.getLogger(__name__)
 
 
@@ -556,10 +556,21 @@ def _load_initial_questions() -> list[str]:
 
 def _default_session_log_path(model_name: str) -> str:
     logs_dir = os.path.join(os.path.dirname(__file__) or ".", "qa_logs")
-    os.makedirs(logs_dir, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_slug = _sanitize_for_filename(model_name)
-    return os.path.join(logs_dir, f"qa_{model_slug}_{ts}.jsonl")
+    base = os.path.join(logs_dir, f"qa_{model_slug}.jsonl")
+    return _with_timestamp_suffix(base)
+
+
+def _with_timestamp_suffix(path: str) -> str:
+    date_part = datetime.now().strftime("%d-%m-%y")
+    time_part = datetime.now().strftime("%H-%M")
+    directory, filename = os.path.split(path)
+    stem, ext = os.path.splitext(filename)
+    if not stem:
+        stem = "qa_log"
+    if not ext:
+        ext = ".jsonl"
+    return os.path.join(directory, f"{stem}_{date_part}-{time_part}{ext}")
 
 
 def _session_log_path(model_name: str, qa_log_path: Optional[str]) -> str:
@@ -568,28 +579,25 @@ def _session_log_path(model_name: str, qa_log_path: Optional[str]) -> str:
     If qa_log_path is:
     - None: use default qa_logs/qa_<model>_<ts>.jsonl
     - a directory: create file qa_<model>_<ts>.jsonl inside it
-    - a file path: use it directly (create parent directories)
+    - a file path: use it directly (create parent directories), but still add a timestamp suffix
     """
     if not qa_log_path:
         return _default_session_log_path(model_name)
 
-    expanded = os.path.expanduser(qa_log_path)
-    expanded = os.path.abspath(expanded)
-
-    # If it exists and is a directory, or if it ends with path separator, treat as directory.
+    expanded = os.path.abspath(os.path.expanduser(qa_log_path))
     treat_as_dir = os.path.isdir(expanded) or qa_log_path.endswith(os.sep)
 
     if treat_as_dir:
         os.makedirs(expanded, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_slug = _sanitize_for_filename(model_name)
-        return os.path.join(expanded, f"qa_{model_slug}_{ts}.jsonl")
+        base = os.path.join(expanded, f"qa_{model_slug}.jsonl")
+        return _with_timestamp_suffix(base)
 
     parent = os.path.dirname(expanded)
     if parent:
         os.makedirs(parent, exist_ok=True)
 
-    return expanded
+    return _with_timestamp_suffix(expanded)
 
 
 def run_analyzer(runtime_args=None):
@@ -702,7 +710,6 @@ def run_analyzer(runtime_args=None):
                 "time": duration,
             },
         )
-        logger.info("🤖 Reply: %s", reply_text)
         return reply_text
 
     if run_initial:
